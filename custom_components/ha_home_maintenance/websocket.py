@@ -9,7 +9,13 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_ADMIN_ONLY, CONF_SIDEBAR_TITLE, DOMAIN
+from .const import (
+    CONF_ADMIN_ONLY,
+    CONF_SIDEBAR_TITLE,
+    DEFAULT_ADMIN_ONLY,
+    DEFAULT_SIDEBAR_TITLE,
+    DOMAIN,
+)
 from .store import HomeMaintenanceTask, TaskStore, calculate_next_due
 from .templates import TASK_TEMPLATES
 
@@ -284,11 +290,14 @@ async def ws_get_config(
 ) -> None:
     """Return the integration configuration options."""
     domain_data = hass.data.get(DOMAIN) or {}
-    config: dict[str, Any] = domain_data.get("config", {})
+    entry = domain_data.get("entry")
+    options = entry.options if entry else {}
     connection.send_result(
         msg["id"],
         {
-            CONF_ADMIN_ONLY: config.get(CONF_ADMIN_ONLY, False),
-            CONF_SIDEBAR_TITLE: config.get(CONF_SIDEBAR_TITLE, "Home Maintenance Pro"),
+            CONF_ADMIN_ONLY: options.get(CONF_ADMIN_ONLY, DEFAULT_ADMIN_ONLY),
+            CONF_SIDEBAR_TITLE: options.get(
+                CONF_SIDEBAR_TITLE, DEFAULT_SIDEBAR_TITLE
+            ),
         },
     )

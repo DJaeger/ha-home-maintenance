@@ -58,8 +58,8 @@ After the integration is set up, you can adjust its options at any time via **Se
 
 | Option | Default | Description |
 |---|---|---|
-| `admin_only` | `false` | Restrict the sidebar panel to admin users only |
-| `sidebar_title` | `"Home Maintenance Pro"` | The title displayed in the sidebar navigation |
+| `admin_only` | `true` | Restrict the sidebar panel to admin users only |
+| `sidebar_title` | `"Maintenance"` | The title displayed in the sidebar navigation |
 
 ---
 
