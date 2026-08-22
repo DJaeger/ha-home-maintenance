@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, NAME, VERSION
-from .store import HomeMaintenanceTask, TaskStore
+from .store import HomeMaintenanceTask, TaskStore, calculate_next_due
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,11 +35,15 @@ async def async_setup_entry(
     """Set up binary sensor entities from a config entry."""
     store: TaskStore = hass.data[DOMAIN]["store"]
 
-    # Create sensors for existing tasks
-    entities = [
+    # Create sensors for existing tasks, plus a single aggregate sensor that
+    # reports whether any task is overdue. The aggregate sensor is always
+    # created on setup so it is available out of the box on a fresh install,
+    # even before any tasks exist.
+    entities: list[BinarySensorEntity] = [
         HomeMaintenanceSensor(store, task, entry)
         for task in store.get_all_tasks()
     ]
+    entities.append(HomeMaintenanceAnyOverdueSensor(store, entry))
     async_add_entities(entities)
 
     # Listen for store changes to add/remove sensors
@@ -98,22 +106,25 @@ class HomeMaintenanceSensor(BinarySensorEntity):
         task = self._store.get_task(self._task_id)
         if task is None:
             return True
-        if not self._is_in_season(task):
+        return self._task_is_overdue(task)
+
+    @classmethod
+    def _task_is_overdue(cls, task: HomeMaintenanceTask) -> bool:
+        """Return True if the given task is currently overdue."""
+        if not cls._is_in_season(task):
             return False  # Out of season tasks never report overdue
         if task.last_performed is None:
             return True  # Never performed = overdue
 
-        try:
-            last = datetime.strptime(task.last_performed, "%Y-%m-%d")
-        except (ValueError, TypeError):
+        next_due = calculate_next_due(task)
+        if next_due is None:
             _LOGGER.warning(
                 "Invalid last_performed date '%s' for task '%s'",
                 task.last_performed,
                 task.title,
             )
             return True
-        due = self._add_interval(last, task.interval_type, task.interval_value)
-        return datetime.now() >= due
+        return dt_util.now().date() >= next_due
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -122,12 +133,12 @@ class HomeMaintenanceSensor(BinarySensorEntity):
         if task is None:
             return {}
 
-        next_due = self._calculate_next_due(task)
+        next_due = calculate_next_due(task)
         return {
             "title": task.title,
             "description": task.description,
             "last_performed": task.last_performed,
-            "next_due": next_due,
+            "next_due": next_due.isoformat() if next_due else None,
             "interval": f"{task.interval_value} {task.interval_type}",
             "icon": task.icon,
             "tag_id": task.tag_id,
@@ -198,29 +209,82 @@ class HomeMaintenanceSensor(BinarySensorEntity):
         """Return True if the task is currently within its active months."""
         if not task.active_months:
             return True
-        return datetime.now().month in task.active_months
+        return dt_util.now().month in task.active_months
 
-    @staticmethod
-    def _add_interval(
-        base: datetime, interval_type: str, interval_value: int
-    ) -> datetime:
-        """Return base + interval."""
-        if interval_type == "days":
-            return base + timedelta(days=interval_value)
-        if interval_type == "weeks":
-            return base + timedelta(weeks=interval_value)
-        if interval_type == "months":
-            # Approximate months as 30 days
-            return base + timedelta(days=interval_value * 30)
-        return base + timedelta(days=interval_value)
 
-    def _calculate_next_due(self, task: HomeMaintenanceTask) -> str | None:
-        """Return the next-due date as an ISO string, or None."""
-        if task.last_performed is None:
-            return None
-        try:
-            last = datetime.strptime(task.last_performed, "%Y-%m-%d")
-        except (ValueError, TypeError):
-            return None
-        due = self._add_interval(last, task.interval_type, task.interval_value)
-        return due.strftime("%Y-%m-%d")
+class HomeMaintenanceAnyOverdueSensor(BinarySensorEntity):
+    """Binary sensor that is ON when at least one maintenance task is overdue.
+
+    This aggregate sensor is created automatically on setup (no per-task
+    configuration required) so users have a single entity to key generic
+    "you have overdue maintenance" automations/notifications off of, instead
+    of having to combine every per-task sensor themselves.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_icon = "mdi:calendar-alert"
+
+    def __init__(self, store: TaskStore, entry: ConfigEntry) -> None:
+        self._store = store
+        self._entry = entry
+        self._attr_unique_id = f"{DOMAIN}_any_overdue"
+        self._attr_name = "Any Overdue"
+        # Pin the entity_id rather than letting it fall out of the
+        # has_entity_name/device-name auto-generation. README has documented
+        # this exact entity_id since the integration's first commit.
+        self.entity_id = "binary_sensor.home_maintenance_any_overdue"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return device info to link this entity to the integration device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=NAME,
+            manufacturer="Home Maintenance Pro",
+            sw_version=VERSION,
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if any task is currently overdue."""
+        return bool(self._overdue_tasks())
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return extra state attributes for the entity."""
+        overdue = self._overdue_tasks()
+        return {
+            "overdue_count": len(overdue),
+            "overdue_tasks": [task.title for task in overdue],
+        }
+
+    async def async_added_to_hass(self) -> None:
+        """Register event listener when entity is added."""
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                f"{DOMAIN}_tasks_updated", self._handle_update
+            )
+        )
+        # Tasks can transition to overdue purely by time passing, without any
+        # store mutation. Poll on an interval so we still detect that.
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass, self._handle_tick, OVERDUE_CHECK_INTERVAL
+            )
+        )
+
+    async def _handle_tick(self, _now) -> None:
+        self.async_write_ha_state()
+
+    async def _handle_update(self, event) -> None:
+        """Handle task-updated events by refreshing state."""
+        self.async_write_ha_state()
+
+    def _overdue_tasks(self) -> list[HomeMaintenanceTask]:
+        """Return the list of tasks that are currently overdue."""
+        return [
+            task
+            for task in self._store.get_all_tasks()
+            if HomeMaintenanceSensor._task_is_overdue(task)
+        ]

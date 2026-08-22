@@ -13,7 +13,13 @@ from homeassistant.config_entries import (  # type: ignore[import-untyped]
 )
 from homeassistant.core import callback  # type: ignore[import-untyped]
 
-from .const import CONF_ADMIN_ONLY, CONF_SIDEBAR_TITLE, DOMAIN
+from .const import (
+    CONF_ADMIN_ONLY,
+    CONF_SIDEBAR_TITLE,
+    DEFAULT_ADMIN_ONLY,
+    DEFAULT_SIDEBAR_TITLE,
+    DOMAIN,
+)
 
 
 class HaHomeMaintenanceConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -60,12 +66,14 @@ class HaHomeMaintenanceOptionsFlow(OptionsFlow):
                 {
                     vol.Required(
                         CONF_ADMIN_ONLY,
-                        default=self.config_entry.options.get(CONF_ADMIN_ONLY, True),
+                        default=self.config_entry.options.get(
+                            CONF_ADMIN_ONLY, DEFAULT_ADMIN_ONLY
+                        ),
                     ): bool,
                     vol.Required(
                         CONF_SIDEBAR_TITLE,
                         default=self.config_entry.options.get(
-                            CONF_SIDEBAR_TITLE, "Maintenance"
+                            CONF_SIDEBAR_TITLE, DEFAULT_SIDEBAR_TITLE
                         ),
                     ): str,
                 }

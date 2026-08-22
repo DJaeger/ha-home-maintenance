@@ -2,12 +2,20 @@
 
 ## Version Bumping
 
-Always bump the version (both files) whenever any functional change is made:
+Always bump the version in **all three** files whenever any functional change is made. They must always match:
 
-- `custom_components/ha_home_maintenance/panel/src/const.ts` — `VERSION` constant
 - `custom_components/ha_home_maintenance/manifest.json` — `version` field
+- `custom_components/ha_home_maintenance/panel/src/const.ts` — `VERSION` constant
+- `custom_components/ha_home_maintenance/const.py` — `VERSION` constant (surfaced as `sw_version` on the HA device page)
 
 Use semantic versioning: patch (x.x.+1) for bug fixes, minor (x.+1.0) for new features.
+
+Verify they agree before finishing:
+
+```
+grep -h VERSION custom_components/ha_home_maintenance/const.py custom_components/ha_home_maintenance/panel/src/const.ts
+grep version custom_components/ha_home_maintenance/manifest.json
+```
 
 ## Translations
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 
 import voluptuous as vol
-
 from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -17,6 +16,8 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_ADMIN_ONLY,
     CONF_SIDEBAR_TITLE,
+    DEFAULT_ADMIN_ONLY,
+    DEFAULT_SIDEBAR_TITLE,
     DOMAIN,
     NAME,
     SERVICE_COMPLETE_TASK,
@@ -63,8 +64,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_register_websockets(hass)
 
     # Register panel
-    admin_only = entry.options.get(CONF_ADMIN_ONLY, True)
-    sidebar_title = entry.options.get(CONF_SIDEBAR_TITLE, "Maintenance")
+    admin_only = entry.options.get(CONF_ADMIN_ONLY, DEFAULT_ADMIN_ONLY)
+    sidebar_title = entry.options.get(CONF_SIDEBAR_TITLE, DEFAULT_SIDEBAR_TITLE)
     await async_register_panel(
         hass, sidebar_title=sidebar_title, admin_only=admin_only
     )
